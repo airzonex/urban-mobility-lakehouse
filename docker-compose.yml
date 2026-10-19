@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:17.11-bookworm
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${CATALOG_DB:?Set CATALOG_DB in .env}
+      POSTGRES_USER: ${CATALOG_USER:?Set CATALOG_USER in .env}
+      POSTGRES_PASSWORD: ${CATALOG_PASSWORD:?Set CATALOG_PASSWORD in .env}
+    
+    ports:
+      - "${CATALOG_HOST_PORT:?Set CATALOG_HOST_PORT in .env}:5432"
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    
+    mem_limit: 512m
+
+volumes:
+  postgres_data:
