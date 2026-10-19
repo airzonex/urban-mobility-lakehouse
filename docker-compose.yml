@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${CATALOG_PASSWORD:?Set CATALOG_PASSWORD in .env}
     
     ports:
-      - "${CATALOG_HOST_PORT:?Set CATALOG_HOST_PORT in .env}:5432"
+      - "127.0.0.1:${CATALOG_HOST_PORT:?Set CATALOG_HOST_PORT in .env}:5432"
     
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -22,5 +22,50 @@ services:
     
     mem_limit: 512m
 
+  minio:
+    image: chainguard/minio:latest@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+    command: server /data --console-address :9001
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
+
+    volumes:
+     - minio_data:/data
+
+    mem_limit: 1g
+
+  minio-init:
+    image: chainguard/minio-client:latest-dev@sha256:0f20f9b9a9a06e2ada88afda965b824fd2d77793083b3b2b10186a9502c836f4
+    depends_on:
+      minio:
+        condition: service_started
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_WAREHOUSE_BUCKET: ${MINIO_WAREHOUSE_BUCKET:?Set MINIO_WAREHOUSE_BUCKET in .env}
+      MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:?Set MINIO_RAW_BUCKET in .env}
+
+    entrypoint: [/bin/sh, -ec]
+
+    command:
+      - |
+        attempt=0
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && mc ready local; do
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 60 ]; then echo "MinIO readiness timeout" >&2; exit 1; fi
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$MINIO_RAW_BUCKET"
+        mc mb --ignore-existing "local/$$MINIO_WAREHOUSE_BUCKET"
+
+    mem_limit: 256m
+
 volumes:
   postgres_data:
+  minio_data:
