@@ -66,6 +66,22 @@ services:
 
     mem_limit: 256m
 
+  spark:
+    build: ./docker/spark
+    profiles: [tools]
+    
+    environment:
+      PYSPARK_PYTHON: python3
+      SPARK_LOCAL_IP: 127.0.0.1
+    
+    volumes:
+      - ./jobs:/opt/jobs:ro
+    
+    command: [/opt/jobs/hello_spark.py]
+    
+    mem_limit: 2g
+    cpus: 2
+
 volumes:
   postgres_data:
   minio_data:
