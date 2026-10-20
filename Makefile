@@ -3,7 +3,8 @@
 PYTHON := .venv/vin/python
 
 .PHONY: help config up down ps logs build-spark \
-		check-spark check-iceberg check-iceberg-read lint format
+		check-spark check-iceberg check-iceberg-read lint format \
+		sql
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -22,7 +23,7 @@ config:
 	docker compose config --quiet
 
 up:
-	docker compose up -d postgres minio minio-init
+	docker compose up -d postgres minio minio-init trino
 
 down:
 	docker compose down
@@ -50,3 +51,6 @@ lint:
 
 format:
 	${PYTHON} -m ruff format jobs/
+
+sql:
+	docker compose exec trino trino --server http://localhost:8080 --catalog lakehouse --schema demo
