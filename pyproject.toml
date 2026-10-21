@@ -2,15 +2,17 @@
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = []
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project]
 name = "urban-mobility-lakehouse"
 version = "0.1.0"
 description = "Urban mobility analytics lakehouse"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "httpx==0.28.1",
+]
 
 [project.optional-dependencies]
 dev = [
