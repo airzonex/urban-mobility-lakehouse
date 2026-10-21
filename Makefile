@@ -23,7 +23,7 @@ config:
 	docker compose config --quiet
 
 up:
-	docker compose up -d postgres minio minio-init trino
+	docker compose up -d postgres minio minio-init catalog-init trino
 
 down:
 	docker compose down
@@ -35,7 +35,7 @@ logs:
 	docker compose logs --tail=100
 
 build-spark:
-	docker compose build spark
+	docker compose build spark catalog-init
 
 check-spark:
 	docker compose run --rm -T --no-deps spark /opt/jobs/hello_spark.py
