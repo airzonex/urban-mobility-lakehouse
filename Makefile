@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-PYTHON := .venv/vin/python
+PYTHON := .venv/bin/python
 
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
