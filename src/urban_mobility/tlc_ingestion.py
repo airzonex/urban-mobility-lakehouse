@@ -9,7 +9,12 @@ from tempfile import TemporaryDirectory
 import boto3
 import httpx
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
+
+
+class InvalidMetadataError(ValueError):
+    pass
 
 
 def _make_filename(year: int, month: int) -> str:
@@ -75,7 +80,92 @@ def _upload_metadata(
     print(f"Uploaded: s3://{bucket}/{metadata_key}")
 
 
+def _read_metadata(
+    s3,
+    bucket: str,
+    metadata_key: str,
+) -> dict | None:
+    try:
+        response = s3.get_object(
+            Bucket=bucket,
+            Key=metadata_key
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            return None
+        raise
+
+    body = response["Body"]
+    try:
+        try:
+            metadata = json.loads(body.read())
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise InvalidMetadataError(
+                f"Invalid JSON: s3://{bucket}/{metadata_key}"
+            ) from e
+    finally:
+        body.close()
+
+    if not isinstance(metadata, dict):
+        raise InvalidMetadataError(
+            f"Metadata must be a JSON object: s3://{bucket}/{metadata_key}"
+        )
+
+    return metadata
+
+
+def _get_parquet_length(s3, bucket: str, object_key: str) -> int | None:
+    try:
+        response = s3.head_object(
+            Bucket=bucket,
+            Key=object_key
+        )
+    except ClientError as e:
+        if e.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+            return None
+        raise
+
+    return response["ContentLength"]
+
 def main() -> None:
+
+    def _upload_data() -> None:
+        _upload_file(
+            s3=s3,
+            destination=destination,
+            bucket=bucket,
+            object_key=object_key,
+        )
+
+        metadata = {
+            "source_url": url,
+            "year": args.year,
+            "month": args.month,
+            "filename": filename,
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "downloaded_at": downloaded_at,
+        }
+
+        _upload_metadata(
+            s3=s3,
+            bucket=bucket,
+            metadata_key=metadata_key,
+            metadata=metadata,
+        )
+
+
+    def _repair_data() -> None:
+        print(f"Removing invalid metadata: s3://{bucket}/{metadata_key}")
+
+        s3.delete_object(
+            Bucket=bucket,
+            Key=metadata_key
+        )
+
+        _upload_data()
+
+
     project_root = Path(__file__).resolve().parents[2]
     load_dotenv(project_root / ".env")
 
@@ -117,29 +207,53 @@ def main() -> None:
         object_key = f"{object_prefix}/{filename}"
         metadata_key = f"{object_prefix}/metadata.json"
 
-        _upload_file(
-            s3=s3,
-            destination=destination,
-            bucket=bucket,
-            object_key=object_key,
-        )
+        try:
+            metadata = _read_metadata(s3, bucket, metadata_key)
+        except InvalidMetadataError:
+            print(f"Invalid metadata: s3://{bucket}/{metadata_key}")
+            _repair_data()
+            return
 
-        metadata = {
+        if metadata is None:
+            _upload_data()
+            return
+        
+        expected = {
             "source_url": url,
             "year": args.year,
             "month": args.month,
             "filename": filename,
             "sha256": sha256,
             "size_bytes": size_bytes,
-            "downloaded_at": downloaded_at,
         }
 
-        _upload_metadata(
-            s3=s3,
-            bucket=bucket,
-            metadata_key=metadata_key,
-            metadata=metadata,
-        )
+        downloaded_at_value = metadata["downloaded_at"]
+
+        if (
+            any(metadata.get(key) != value for key, value in expected.items())
+            or not isinstance(downloaded_at_value, str)
+            or not downloaded_at_value
+        ):
+            print(f"Metadata mismatch: s3://{bucket}/{metadata_key}")
+            _repair_data()
+            return
+        
+        parquet_length = _get_parquet_length(s3, bucket, object_key)
+
+        if parquet_length is None:
+            print(f"Stored Parquet file is missing: s3://{bucket}/{object_key}")
+            _repair_data()
+            return
+        
+        if parquet_length != size_bytes:
+            print(
+                f"Stored Parquet size mismatch: "
+                f"expected: {size_bytes}, actual: {parquet_length}"
+            )
+            _repair_data()
+            return
+
+        print(f"SKIPPED: s3://{bucket}/{object_key}")
 
 
 if __name__ == "__main__":
