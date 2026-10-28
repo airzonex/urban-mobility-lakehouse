@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 from urban_mobility.tlc_ingestion import (
     InvalidMetadataError,
     _read_metadata,
+    _get_parquet_length,
 )
 
 
@@ -170,3 +171,76 @@ def test_read_metadata_raises_when_connection_interrupted() -> None:
 
     assert exc_info.value is error
     assert body.closed
+
+def test_get_parquet_length_returns_content_length() -> None:
+    expected = 100
+    s3 = Mock()
+    s3.head_object.return_value = {"ContentLength": expected}
+
+    actual = _get_parquet_length(
+        s3=s3,
+        bucket="raw",
+        object_key="test/object.parquet",
+    )
+
+    assert actual == expected
+    s3.head_object.assert_called_once_with(
+        Bucket="raw",
+        Key="test/object.parquet"
+    )
+
+def test_get_parquet_length_returns_none_when_obj_is_missing() -> None:
+    error = ClientError(
+        error_response={
+            "ResponseMetadata": {
+                "HTTPStatusCode": 404
+            }
+        },
+        operation_name="HeadObject"
+    )
+
+    s3 = Mock()
+    s3.head_object.side_effect = error
+
+    actual = _get_parquet_length(
+        s3=s3,
+        bucket="raw",
+        object_key="test/object.parquet",
+    )
+
+    assert actual is None
+
+def test_get_parquet_length_raises_when_connection_error() -> None:
+    error = OSError("Connection interrupted")
+
+    s3 = Mock()
+    s3.head_object.side_effect = error
+
+    with pytest.raises(OSError) as exc_info:
+        _get_parquet_length(
+            s3=s3,
+            bucket="raw",
+            object_key="test/object.parquet",
+        )
+
+    assert exc_info.value is error
+
+def test_get_parquet_length_raises_when_access_denied() -> None:
+    error = ClientError(
+        error_response={
+            "ResponseMetadata": {"HTTPStatusCode": 403},
+        },
+        operation_name="HeadObject",
+    )
+
+    s3 = Mock()
+    s3.head_object.side_effect = error
+
+    with pytest.raises(ClientError) as exc_info:
+        _get_parquet_length(
+            s3=s3,
+            bucket="raw",
+            object_key="test/object.parquet",
+        )
+
+    assert exc_info.value is error
