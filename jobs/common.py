@@ -24,6 +24,16 @@ def spark_session(app_name: str) -> SparkSession:
         f"{catalog}.s3.endpoint": os.environ["S3_ENDPOINT"],
         f"{catalog}.s3.path-style-access": "true",
         f"{catalog}.client.region": os.environ["AWS_REGION"],
+
+        # Чтение обычных файлов из MinIO через Hadoop S3A.
+        "spark.hadoop.fs.s3a.endpoint": os.environ["S3_ENDPOINT"],
+        "spark.hadoop.fs.s3a.endpoint.region": os.environ["AWS_REGION"],
+        "spark.hadoop.fs.s3a.path.style.access": "true",
+        "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
+        "spark.hadoop.fs.s3a.aws.credentials.provider": (
+            "software.amazon.awssdk.auth.credentials."
+            "EnvironmentVariableCredentialsProvider"
+        ),        
     }
 
     builder = SparkSession.builder.appName(app_name)

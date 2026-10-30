@@ -14,7 +14,13 @@ RUN set -eux; \
         -o /opt/spark/jars/iceberg-aws-bundle.jar; \
     curl -fSL --retry 3 \
         https://repo.maven.apache.org/maven2/org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar \
-        -o /opt/spark/jars/postgresql.jar
+        -o /opt/spark/jars/postgresql.jar; \
+    curl -fSL --retry 3 \
+        https://repo.maven.apache.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar \
+        -o /opt/spark/jars/hadoop-aws-3.4.2.jar; \
+    curl -fSL --retry 3 \
+        https://repo.maven.apache.org/maven2/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar \
+        -o /opt/spark/jars/aws-sdk-bundle-2.29.52.jar        
 
 USER 185
 
