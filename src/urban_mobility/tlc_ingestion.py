@@ -127,8 +127,12 @@ def _get_parquet_length(s3, bucket: str, object_key: str) -> int | None:
 
     return response["ContentLength"]
 
-def main() -> None:
-
+def ingest_month(
+    s3,
+    bucket: str,
+    year: int,
+    month: int,
+) -> None:
     def _upload_data() -> None:
         _upload_file(
             s3=s3,
@@ -139,8 +143,8 @@ def main() -> None:
 
         metadata = {
             "source_url": url,
-            "year": args.year,
-            "month": args.month,
+            "year": year,
+            "month": month,
             "filename": filename,
             "sha256": sha256,
             "size_bytes": size_bytes,
@@ -166,42 +170,16 @@ def main() -> None:
         _upload_data()
 
 
-    project_root = Path(__file__).resolve().parents[2]
-    load_dotenv(project_root / ".env")
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--month", type=int, choices=range(1, 13), required=True)
-    args = parser.parse_args()
-
-    if not 1000 <= args.year <= 9999:
-        parser.error("--year must be a four-digit year")
-
-    filename = _make_filename(args.year, args.month)
+    filename = _make_filename(year, month)
     url = _make_url(filename)
-
-    endpoint = f"http://localhost:{os.environ['MINIO_API_PORT']}"
-    access_key = os.environ["MINIO_ROOT_USER"]
-    secret_key = os.environ["MINIO_ROOT_PASSWORD"]
-    region = os.environ["MINIO_REGION"]
-    bucket = os.environ["MINIO_RAW_BUCKET"]
 
     with TemporaryDirectory() as temp_dir:
         destination = Path(temp_dir) / filename
 
         sha256, size_bytes, downloaded_at = _download_file(url, destination)
 
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region,
-            config=Config(s3={"addressing_style": "path"}),
-        )
-
         object_prefix = (
-            f"tlc/yellow/year={args.year}/month={args.month:02d}/sha256={sha256}"
+            f"tlc/yellow/year={year}/month={month:02d}/sha256={sha256}"
         )
 
         object_key = f"{object_prefix}/{filename}"
@@ -220,14 +198,14 @@ def main() -> None:
         
         expected = {
             "source_url": url,
-            "year": args.year,
-            "month": args.month,
+            "year": year,
+            "month": month,
             "filename": filename,
             "sha256": sha256,
             "size_bytes": size_bytes,
         }
 
-        downloaded_at_value = metadata["downloaded_at"]
+        downloaded_at_value = metadata.get("downloaded_at")
 
         if (
             any(metadata.get(key) != value for key, value in expected.items())
@@ -255,6 +233,43 @@ def main() -> None:
 
         print(f"SKIPPED: s3://{bucket}/{object_key}")
 
+
+def main() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    load_dotenv(project_root / ".env")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", type=int, required=True)
+    parser.add_argument("--month", type=int, choices=range(1, 13), required=True)
+    args = parser.parse_args()
+
+    if not 1000 <= args.year <= 9999:
+        parser.error("--year must be a four-digit year")
+
+    endpoint = f"http://localhost:{os.environ['MINIO_API_PORT']}"
+    access_key = os.environ["MINIO_ROOT_USER"]
+    secret_key = os.environ["MINIO_ROOT_PASSWORD"]
+    region = os.environ["MINIO_REGION"]
+    bucket = os.environ["MINIO_RAW_BUCKET"]
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+        config=Config(s3={"addressing_style": "path"}),
+    )
+
+    try:
+        ingest_month(
+            s3=s3,
+            bucket=bucket,
+            year=args.year,
+            month=args.month,
+        )
+    finally:
+        s3.close()
 
 if __name__ == "__main__":
     main()
