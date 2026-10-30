@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 
 class InvalidMetadataError(ValueError):
     pass
@@ -61,7 +63,7 @@ def _upload_file(
         Key=object_key,
     )
 
-    print(f"Uploaded: s3://{bucket}/{object_key}")
+    logger.info("Uploaded: s3://%s/%s", bucket, object_key)
 
 
 def _upload_metadata(
@@ -77,7 +79,7 @@ def _upload_metadata(
         ContentType="application/json",
     )
 
-    print(f"Uploaded: s3://{bucket}/{metadata_key}")
+    logger.info("Uploaded: s3://%s/%s", bucket, metadata_key)
 
 
 def _read_metadata(
@@ -160,7 +162,7 @@ def ingest_month(
 
 
     def _repair_data() -> None:
-        print(f"Removing invalid metadata: s3://{bucket}/{metadata_key}")
+        logger.info("Removing invalid metadata: s3://%s/%s", bucket, metadata_key)
 
         s3.delete_object(
             Bucket=bucket,
@@ -188,7 +190,11 @@ def ingest_month(
         try:
             metadata = _read_metadata(s3, bucket, metadata_key)
         except InvalidMetadataError:
-            print(f"Invalid metadata: s3://{bucket}/{metadata_key}")
+            logger.warning(
+                "Invalid metadata: s3://%s/%s; starting repair",
+                bucket,
+                metadata_key,
+            )
             _repair_data()
             return
 
@@ -212,29 +218,44 @@ def ingest_month(
             or not isinstance(downloaded_at_value, str)
             or not downloaded_at_value
         ):
-            print(f"Metadata mismatch: s3://{bucket}/{metadata_key}")
+            logger.warning(
+                "Metadata mismatch: s3://%s/%s; starting repair",
+                bucket,
+                metadata_key,
+            )
             _repair_data()
             return
         
         parquet_length = _get_parquet_length(s3, bucket, object_key)
 
         if parquet_length is None:
-            print(f"Stored Parquet file is missing: s3://{bucket}/{object_key}")
+            logger.warning(
+                "Stored Parquet file is missing: s3://%s/%s; starting repair",
+                bucket,
+                object_key,
+            )
             _repair_data()
             return
         
         if parquet_length != size_bytes:
-            print(
-                f"Stored Parquet size mismatch: "
-                f"expected: {size_bytes}, actual: {parquet_length}"
+            logger.warning(
+                "Stored Parquet size mismatch: expected=%s, actual=%s; starting repair",
+                size_bytes,
+                parquet_length,
             )
             _repair_data()
             return
 
-        print(f"SKIPPED: s3://{bucket}/{object_key}")
+        logger.info("SKIPPED: s3://%s/%s", bucket, object_key)
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     project_root = Path(__file__).resolve().parents[2]
     load_dotenv(project_root / ".env")
 
