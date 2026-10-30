@@ -1,7 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-
 spark = SparkSession.builder.appName("hello-spark").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
