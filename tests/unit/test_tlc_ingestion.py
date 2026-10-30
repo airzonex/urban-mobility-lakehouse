@@ -1,12 +1,17 @@
 import io
 import json
-from unittest.mock import Mock
+import hashlib
+import httpx
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
 from urban_mobility.tlc_ingestion import (
     InvalidMetadataError,
+    _download_file,
     _read_metadata,
     _get_parquet_length,
 )
@@ -244,3 +249,109 @@ def test_get_parquet_length_raises_when_access_denied() -> None:
         )
 
     assert exc_info.value is error
+
+def test_download_file_writes_content_and_returns_metadata(
+    tmp_path: Path,
+) -> None:
+    chunks = [b"first_chunk", b"second_chunk"]
+    content = b"".join(chunks)
+    destination = tmp_path / "test.parquet"
+
+    response = Mock()
+    response.iter_bytes.return_value = iter(chunks)
+
+    with patch("urban_mobility.tlc_ingestion.httpx.Client") as client_class:
+        client = client_class.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        sha256, size_bytes, downloaded_at = _download_file(
+            url="https://example.com/test.parquet",
+            destination=destination
+        )
+
+    assert destination.read_bytes() == content
+    assert sha256 == hashlib.sha256(content).hexdigest()
+    assert size_bytes == len(content)
+
+    timestamp = datetime.fromisoformat(downloaded_at)
+    assert timestamp.utcoffset() == timedelta(0)
+
+    response.raise_for_status.assert_called_once_with()
+
+def test_download_file_raises_when_http_error_occurs(
+    tmp_path: Path
+) -> None:
+    url = "https://example.com/missing.parquet"
+    destination = tmp_path / "test.parquet"
+
+    request = httpx.Request("GET", url)
+    http_response = httpx.Response(404, request=request)
+    error = httpx.HTTPStatusError(
+        "Not Found",
+        request=request,
+        response=http_response,
+    )
+
+    response = Mock()
+    response.raise_for_status.side_effect = error
+
+    with patch("urban_mobility.tlc_ingestion.httpx.Client") as client_class:
+        client = client_class.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            _download_file(
+                url=url,
+                destination=destination
+            )
+
+    assert exc_info.value is error
+    assert not destination.exists()
+    response.iter_bytes.assert_not_called()
+
+def test_download_file_raises_when_client_stream_open_error_occurs(
+    tmp_path: Path
+) -> None:
+    url = "https://example.com/test.parquet"
+    destination = tmp_path / "test.parquet"
+    error = httpx.HTTPError("Connection refused")
+    
+    with patch("urban_mobility.tlc_ingestion.httpx.Client") as client_class:
+        client = client_class.return_value.__enter__.return_value
+        client.stream.side_effect = error
+
+        with pytest.raises(httpx.HTTPError) as exc_info:
+            _download_file(
+                url=url,
+                destination=destination
+            )
+
+    assert exc_info.value is error
+    assert not destination.exists()
+
+def test_download_file_raises_when_client_stream_interrupts(
+    tmp_path: Path
+) -> None:
+    url = "https://example.com/test.parquet"
+    destination = tmp_path / "test.parquet"
+    error = httpx.ReadError("Connection interrupted")
+
+    def broken_stream():
+        yield b"first_chunk"
+        raise error
+
+    response = Mock()
+    response.iter_bytes.return_value = broken_stream()
+
+    with patch("urban_mobility.tlc_ingestion.httpx.Client") as client_class:
+        client = client_class.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        with pytest.raises(httpx.ReadError) as exc_info:
+            _download_file(
+                url=url,
+                destination=destination
+            )
+
+    assert exc_info.value is error
+    assert destination.read_bytes() == b"first_chunk"
