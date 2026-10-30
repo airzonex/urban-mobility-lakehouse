@@ -1,19 +1,20 @@
+import hashlib
 import io
 import json
-import hashlib
-import httpx
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 
+import httpx
 import pytest
 from botocore.exceptions import ClientError
 
 from urban_mobility.tlc_ingestion import (
     InvalidMetadataError,
     _download_file,
-    _read_metadata,
     _get_parquet_length,
+    _read_metadata,
+    ingest_month,
 )
 
 
@@ -355,3 +356,595 @@ def test_download_file_raises_when_client_stream_interrupts(
 
     assert exc_info.value is error
     assert destination.read_bytes() == b"first_chunk"
+
+def test_ingest_month_skips_load_if_object_and_metadata_exist() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    metadata = {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+    body = io.BytesIO(json.dumps(metadata).encode("utf-8"))
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+    s3.head_object.return_value = {"ContentLength": size_bytes}
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ) as download:
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    download.assert_called_once()
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+
+    s3.get_object.assert_called_once_with(
+        Bucket="raw",
+        Key=f"{object_prefix}/metadata.json",
+    )
+
+    s3.head_object.assert_called_once_with(
+        Bucket="raw",
+        Key=f"{object_prefix}/yellow_tripdata_2024-01.parquet",
+    )
+
+    s3.upload_file.assert_not_called()
+    s3.put_object.assert_not_called()
+    s3.delete_object.assert_not_called()
+
+def test_ingest_month_uploads_data_when_metadata_is_missing() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    s3 = Mock()
+    s3.get_object.side_effect = ClientError(
+        error_response={"Error": {"Code": "NoSuchKey"}},
+        operation_name="GetObject",
+    )
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ):
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    expected_metadata = {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json"
+        )
+    ]
+
+    uploaded_metadata = json.loads(
+        s3.put_object.call_args.kwargs["Body"]
+    )
+    assert uploaded_metadata == expected_metadata
+
+    uploaded_path = Path(
+        s3.upload_file.call_args.kwargs["Filename"]
+    )
+    assert uploaded_path.name == expected_metadata["filename"]
+
+def test_ingest_month_repairs_invalid_json_metadata() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    body = io.BytesIO(b'{"year":')
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ):
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert body.closed
+
+    assert s3.mock_calls == [
+        call.get_object(
+            Bucket="raw",
+            Key=metadata_key,
+        ),
+        call.delete_object(
+            Bucket="raw",
+            Key=metadata_key,
+        ),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json",
+        ),
+    ]
+
+    uploaded_metadata = json.loads(
+        s3.put_object.call_args.kwargs["Body"]
+    )
+
+    assert uploaded_metadata == {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+def test_ingest_month_repairs_mismatched_metadata() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    metadata = {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+    stored_metadata = {**metadata, "size_bytes": 999}
+    body = io.BytesIO(json.dumps(stored_metadata).encode("utf-8"))
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ):
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert body.closed
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.delete_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json",
+        ),
+    ]
+
+    uploaded_metadata = json.loads(
+        s3.put_object.call_args.kwargs["Body"]
+    )
+    assert uploaded_metadata == metadata
+
+@pytest.mark.parametrize(
+    "downloaded_at_fields",
+    [
+        pytest.param({}, id="missing"),
+        pytest.param({"downloaded_at": ""}, id="empty"),
+        pytest.param({"downloaded_at": None}, id="null"),
+        pytest.param({"downloaded_at": 2024}, id="wrong-type"),
+    ],
+)
+def test_ingest_month_repairs_invalid_downloaded_at(
+    downloaded_at_fields: dict[str, str | int | None],
+) -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    expected_metadata = {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+    stored_metadata = {
+        key: value
+        for key, value in expected_metadata.items()
+        if key != "downloaded_at"
+    }
+    stored_metadata.update(downloaded_at_fields)
+
+    body = io.BytesIO(json.dumps(stored_metadata).encode("utf-8"))
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ):
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert body.closed
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.delete_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json",
+        ),
+    ]
+
+    uploaded_metadata = json.loads(
+        s3.put_object.call_args.kwargs["Body"]
+    )
+    assert uploaded_metadata == expected_metadata
+
+@pytest.mark.parametrize(
+    "stored_size",
+    [
+        pytest.param(None, id="missing-parquet"),
+        pytest.param(999, id="size-mismatch"),
+    ],
+)
+def test_ingest_month_repairs_missing_or_wrong_size_parquet(
+    stored_size: int | None,
+) -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    metadata = {
+        "source_url": (
+            "https://d37ci6vzurychx.cloudfront.net/"
+            "trip-data/yellow_tripdata_2024-01.parquet"
+        ),
+        "year": 2024,
+        "month": 1,
+        "filename": "yellow_tripdata_2024-01.parquet",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "downloaded_at": downloaded_at,
+    }
+
+    body = io.BytesIO(json.dumps(metadata).encode("utf-8"))
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+
+    if stored_size is None:
+        s3.head_object.side_effect = ClientError(
+            error_response={
+                "Error": {"Code": "404"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            },
+            operation_name="HeadObject",
+        )
+    else:
+        s3.head_object.return_value = {"ContentLength": stored_size}
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ):
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert body.closed
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.head_object(Bucket="raw", Key=object_key),
+        call.delete_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json",
+        ),
+    ]
+
+    uploaded_metadata = json.loads(
+        s3.put_object.call_args.kwargs["Body"]
+    )
+    assert uploaded_metadata == metadata
+
+def test_ingest_month_does_not_write_metadata_when_upload_fails() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    error = OSError("Upload interrupted")
+
+    s3 = Mock()
+    s3.get_object.side_effect = ClientError(
+        error_response={"Error": {"Code": "NoSuchKey"}},
+        operation_name="GetObject",
+    )
+    s3.upload_file.side_effect = error
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ), pytest.raises(OSError) as exc_info:
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert exc_info.value is error
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+    ]
+
+    s3.put_object.assert_not_called()
+
+def test_ingest_month_stops_repair_when_metadata_deletion_fails() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    body = io.BytesIO(b'{"year":')
+
+    error = ClientError(
+        error_response={"Error": {"Code": "AccessDenied"}},
+        operation_name="DeleteObject",
+    )
+
+    s3 = Mock()
+    s3.get_object.return_value = {"Body": body}
+    s3.delete_object.side_effect = error
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ), pytest.raises(ClientError) as exc_info:
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert exc_info.value is error
+    assert body.closed
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.delete_object(Bucket="raw", Key=metadata_key),
+    ]
+
+    s3.upload_file.assert_not_called()
+    s3.put_object.assert_not_called()
+
+def test_ingest_month_propagates_metadata_upload_error() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    object_prefix = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}"
+    )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+    metadata_key = f"{object_prefix}/metadata.json"
+
+    error = ClientError(
+        error_response={"Error": {"Code": "AccessDenied"}},
+        operation_name="PutObject",
+    )
+
+    s3 = Mock()
+    s3.get_object.side_effect = ClientError(
+        error_response={"Error": {"Code": "NoSuchKey"}},
+        operation_name="GetObject",
+    )
+    s3.put_object.side_effect = error
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ), pytest.raises(ClientError) as exc_info:
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert exc_info.value is error
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+        call.upload_file(
+            Filename=ANY,
+            Bucket="raw",
+            Key=object_key,
+        ),
+        call.put_object(
+            Bucket="raw",
+            Key=metadata_key,
+            Body=ANY,
+            ContentType="application/json",
+        ),
+    ]
+
+def test_ingest_month_propagates_metadata_access_denied() -> None:
+    sha256 = "a" * 64
+    size_bytes = 100
+    downloaded_at = "2024-02-01T12:00:00+00:00"
+
+    metadata_key = (
+        f"tlc/yellow/year=2024/month=01/sha256={sha256}/metadata.json"
+    )
+
+    error = ClientError(
+        error_response={"Error": {"Code": "AccessDenied"}},
+        operation_name="GetObject",
+    )
+
+    s3 = Mock()
+    s3.get_object.side_effect = error
+
+    with patch(
+        "urban_mobility.tlc_ingestion._download_file",
+        return_value=(sha256, size_bytes, downloaded_at),
+    ), pytest.raises(ClientError) as exc_info:
+        ingest_month(
+            s3=s3,
+            bucket="raw",
+            year=2024,
+            month=1,
+        )
+
+    assert exc_info.value is error
+
+    assert s3.mock_calls == [
+        call.get_object(Bucket="raw", Key=metadata_key),
+    ]
+
+    s3.upload_file.assert_not_called()
+    s3.put_object.assert_not_called()
+    s3.delete_object.assert_not_called()
