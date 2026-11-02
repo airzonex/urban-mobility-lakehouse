@@ -1,7 +1,5 @@
 .env
 
-docs/
-
 .venv/
 __pycache__/
 .ruff_cache/
@@ -9,3 +7,5 @@ __pycache__/
 *.egg-info/
 
 .vscode/
+
+local/
