@@ -4,7 +4,7 @@ PYTHON := .venv/bin/python
 
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
-		sql test-ingestion
+		sql test-ingestion test-spark
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -19,6 +19,7 @@ help:
 	@echo "lint                Run Ruff checks"
 	@echo "format              Format Python code with Ruff"
 	@echo "test-ingestion	   Run TLC ingestion tests"
+	@echo "test-spark		   Run spark integration tests"
 
 config:
 	docker compose config --quiet
@@ -58,3 +59,18 @@ sql:
 
 test-ingestion:
 	${PYTHON} -m pytest tests/integration/ingestion -v
+
+test-spark:
+	docker compose run --rm \
+		-v "$(CURDIR)/tests:/opt/tests:ro" \
+		-e 'PYSPARK_SUBMIT_ARGS=--master local[2] --driver-memory 1g pyspark-shell' \
+		--entrypoint /bin/bash \
+		spark -c '\
+			py4j_zip=(/opt/spark/python/lib/py4j-*-src.zip); \
+			export PYTHONPATH="/opt/jobs:/opt/spark/python:$${py4j_zip[0]}$${PYTHONPATH:+:$$PYTHONPATH}"; \
+			exec python3 -m pytest \
+				/opt/tests/integration/spark \
+				--import-mode=importlib \
+				-o cache_dir=/tmp/pytest-cache \
+				-v \
+		'

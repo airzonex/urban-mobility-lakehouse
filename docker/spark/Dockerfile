@@ -22,6 +22,9 @@ RUN set -eux; \
         https://repo.maven.apache.org/maven2/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar \
         -o /opt/spark/jars/aws-sdk-bundle-2.29.52.jar        
 
+ARG PYTEST_VERSION=9.2.0
+RUN python3 -m pip install --no-cache-dir "pytest==${PYTEST_VERSION}"
+
 USER 185
 
 WORKDIR /opt/spark/work-dir
