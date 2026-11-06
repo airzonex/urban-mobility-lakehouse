@@ -1,16 +1,14 @@
-import re
 import argparse
-import logging
 import json
+import logging
+import re
 from datetime import date
 from urllib.parse import urlsplit
 
+from common import spark_session
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
-
-from common import spark_session
-
 
 logger = logging.getLogger(__name__)
 

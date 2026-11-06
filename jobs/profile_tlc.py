@@ -1,8 +1,7 @@
 import argparse
 
-from pyspark.sql import functions as F
-
 from common import spark_session
+from pyspark.sql import functions as F
 
 
 def main() -> None:
