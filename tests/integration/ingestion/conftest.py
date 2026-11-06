@@ -1,6 +1,5 @@
 import os
 from collections.abc import Iterator
-from pathlib import Path
 from uuid import uuid4
 
 import boto3
@@ -10,9 +9,8 @@ from dotenv import load_dotenv
 
 
 @pytest.fixture
-def s3_client():
-    project_root = Path(__file__).resolve().parents[2]
-    load_dotenv(project_root / ".env")
+def s3_client(pytestconfig: pytest.Config):
+    load_dotenv(pytestconfig.rootpath / ".env")
 
     client = boto3.client(
         "s3",
