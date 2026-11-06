@@ -325,15 +325,17 @@ def transform_trips(
 def create_silver_table(
     spark: SparkSession,
     silver: DataFrame,
+    *,
+    table_name: str = SILVER_TABLE,
 ) -> None:
     spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.silver")
 
-    if spark.catalog.tableExists(SILVER_TABLE):
+    if spark.catalog.tableExists(table_name):
         return
 
     (
         silver.limit(0)
-        .writeTo(SILVER_TABLE)
+        .writeTo(table_name)
         .using("iceberg")
         .tableProperty("format-version", "2")
         .tableProperty("write.format.default", "parquet")
@@ -346,8 +348,9 @@ def write_silver_month(
     silver: DataFrame,
     *,
     source_month: date,
+    table_name: str = SILVER_TABLE,
 ) -> None:
-    silver.writeTo(SILVER_TABLE).overwrite(
+    silver.writeTo(table_name).overwrite(
         F.col("source_month") == F.lit(source_month)
     )
 
