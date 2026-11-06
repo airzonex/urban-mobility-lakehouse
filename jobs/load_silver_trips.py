@@ -72,6 +72,9 @@ SOURCE_TO_SILVER = {
 }
 
 
+SILVER_TABLE = "lakehouse.silver.yellow_trips"
+
+
 def validate_source_path(
     input_path: str,
     year: int,
@@ -319,6 +322,36 @@ def transform_trips(
     )
 
 
+def create_silver_table(
+    spark: SparkSession,
+    silver: DataFrame,
+) -> None:
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.silver")
+
+    if spark.catalog.tableExists(SILVER_TABLE):
+        return
+
+    (
+        silver.limit(0)
+        .writeTo(SILVER_TABLE)
+        .using("iceberg")
+        .tableProperty("format-version", "2")
+        .tableProperty("write.format.default", "parquet")
+        .partitionedBy("source_month")
+        .create()
+    )
+
+
+def write_silver_month(
+    silver: DataFrame,
+    *,
+    source_month: date,
+) -> None:
+    silver.writeTo(SILVER_TABLE).overwrite(
+        F.col("source_month") == F.lit(source_month)
+    )
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -391,29 +424,18 @@ def main() -> None:
             len(trips.columns),
         )
 
+        source_month = date(args.year, args.month, 1)
+
         silver = transform_trips(
             trips,
-            source_month=date(args.year, args.month, 1),
+            source_month=source_month,
             source_file=args.input_path,
             source_sha256=source_sha256,
         )
 
-        silver.printSchema()
-        silver.select(
-            "pickup_datetime",
-            "dropoff_datetime",
-            "pickup_date",
-            "duration_seconds",
-        ).show(10, truncate=False)
         silver.filter(
             F.col("dropoff_datetime") <= F.col("pickup_datetime")
         ).groupBy("duration_seconds").count().orderBy("duration_seconds").show()
-
-        silver.select(
-            "source_month",
-            "source_file",
-            "source_sha256",
-        ).distinct().show(truncate=False)
 
         quality_flags = [
             "is_outside_source_month",
@@ -424,12 +446,32 @@ def main() -> None:
             "has_negative_total_amount",
         ]
 
-        silver.select(
+        quality_counts = silver.select(
             *[
                 F.count(F.when(F.col(name), 1)).alias(name)
                 for name in quality_flags
             ]
-        ).show(truncate=False)
+        ).first()
+
+        logger.info(
+            "Silver quality checks: source_month=%s, count=%s",
+            source_month,
+            quality_counts.asDict(),
+        )
+
+        create_silver_table(spark, silver)
+
+        write_silver_month(
+            silver,
+            source_month=source_month,
+        )
+
+        logger.info(
+            "Silver month committed: table=%s source_month=%s source_sha256=%s",
+            SILVER_TABLE,
+            source_month,
+            source_sha256,
+        )
     finally:
         spark.stop()
 
