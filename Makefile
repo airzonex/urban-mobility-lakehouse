@@ -4,7 +4,7 @@ PYTHON := .venv/bin/python
 
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
-		sql
+		sql test-ingestion
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -18,6 +18,7 @@ help:
 	@echo "check-iceberg-read  Check existing Iceberg table without writing"
 	@echo "lint                Run Ruff checks"
 	@echo "format              Format Python code with Ruff"
+	@echo "test-ingestion	   Run TLC ingestion tests"
 
 config:
 	docker compose config --quiet
@@ -54,3 +55,6 @@ format:
 
 sql:
 	docker compose exec trino trino --server http://localhost:8080 --catalog lakehouse --schema demo
+
+test-ingestion:
+	${PYTHON} -m pytest tests/integration/ingestion -v
