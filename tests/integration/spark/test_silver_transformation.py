@@ -3,9 +3,13 @@ from decimal import Decimal
 
 import pytest
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F 
 from pyspark.sql.types import DecimalType
 
-from load_silver_trips import transform_trips
+from load_silver_trips import (
+    transform_trips,
+    validate_source_schema,
+)
 
 
 RAW_SCHEMA = """
@@ -371,3 +375,77 @@ def test_transform_trips_preserves_duplicates_and_provenance(
         assert row.source_month == source_month
         assert row.source_file == source_file
         assert row.source_sha256 == source_sha256
+
+
+def test_validate_source_schema_rejects_missing_column(
+    spark: SparkSession,
+) -> None:
+    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = trips.drop("total_amount")
+
+    with pytest.raises(
+        ValueError,
+        match="Unexpected source schema",
+    ) as exc_info:
+        validate_source_schema(trips)
+
+    message = str(exc_info.value)
+
+    assert "missing=['total_amount']" in message
+    assert "unexpected=[]" in message
+    assert "type_mismatches={}" in message
+
+
+def test_validate_source_schema_rejects_wrong_type(
+    spark: SparkSession,
+) -> None:
+    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = trips.withColumn(
+        "total_amount",
+        F.col("total_amount").cast("string"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unexpected source schema",
+    ) as exc_info:
+        validate_source_schema(trips)
+
+    message = str(exc_info.value)
+
+    assert "missing=[]" in message
+    assert "unexpected=[]" in message
+    assert (
+        "'total_amount': {'expected': 'double', 'actual': 'string'}"
+        in message
+    )
+
+
+def test_validate_source_schema_rejects_unexpected_column(
+    spark: SparkSession,
+) -> None:
+    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = trips.withColumn(
+        "extra_field",
+        F.lit("unexpected"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unexpected source schema",
+    ) as exc_info:
+        validate_source_schema(trips)
+
+    message = str(exc_info.value)
+
+    assert "missing=[]" in message
+    assert "unexpected=['extra_field']" in message
+    assert "type_mismatches={}" in message
+
+
+def test_validate_source_schema_accepts_expected_schema(
+    spark: SparkSession,
+) -> None:
+    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+
+    validate_source_schema(trips)
