@@ -173,13 +173,13 @@ def validate_source_metadata(
         ):
             raise ValueError(
                 f"Source metadata mismatch for {field}: "
-                f"expected={expected_value:!r}, actual={actual_value:!r}"
+                f"expected={expected_value!r}, actual={actual_value!r}"
             )
 
     size_bytes = metadata.get("size_bytes")
 
     if type(size_bytes) is not int or size_bytes <= 0:
-        raise ValueError(f"size_bytes must be a positive integer: {size_bytes:!r}")
+        raise ValueError(f"size_bytes must be a positive integer: {size_bytes!r}")
 
     jvm = spark._jvm
     hadoop_config = spark.sparkContext._jsc.hadoopConfiguration()
