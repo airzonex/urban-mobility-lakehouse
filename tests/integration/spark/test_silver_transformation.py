@@ -12,54 +12,6 @@ from load_silver_trips import (
 )
 
 
-RAW_SCHEMA = """
-    VendorID INT,
-    tpep_pickup_datetime TIMESTAMP_NTZ,
-    tpep_dropoff_datetime TIMESTAMP_NTZ,
-    passenger_count BIGINT,
-    trip_distance DOUBLE,
-    RatecodeID BIGINT,
-    store_and_fwd_flag STRING,
-    PULocationID INT,
-    DOLocationID INT,
-    payment_type BIGINT,
-    fare_amount DOUBLE,
-    extra DOUBLE,
-    mta_tax DOUBLE,
-    tip_amount DOUBLE,
-    tolls_amount DOUBLE,
-    improvement_surcharge DOUBLE,
-    total_amount DOUBLE,
-    congestion_surcharge DOUBLE,
-    Airport_fee DOUBLE
-"""
-
-
-@pytest.fixture
-def raw_trip() -> dict[str, object]:
-    return {
-        "VendorID": 1,
-        "tpep_pickup_datetime": datetime(2024, 1, 15, 10, 0),
-        "tpep_dropoff_datetime": datetime(2024, 1, 15, 10, 10),
-        "passenger_count": 1,
-        "trip_distance": 2.0,
-        "RatecodeID": 1,
-        "store_and_fwd_flag": "N",
-        "PULocationID": 140,
-        "DOLocationID": 236,
-        "payment_type": 1,
-        "fare_amount": 10.0,
-        "extra": 0.0,
-        "mta_tax": 0.0,
-        "tip_amount": 0.0,
-        "tolls_amount": 0.0,
-        "improvement_surcharge": 0.0,
-        "total_amount": 12.50,
-        "congestion_surcharge": 0.0,
-        "Airport_fee": 0.0,
-    }
-
-
 @pytest.mark.parametrize(
     ("raw_amount", "expected"),
     [
@@ -72,11 +24,12 @@ def raw_trip() -> dict[str, object]:
 def test_transform_trips_converts_total_amount_to_decimal(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
     raw_amount: float | None,
     expected: Decimal | None,
 ) -> None:
     raw_trip["total_amount"] = raw_amount
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -131,6 +84,7 @@ def test_transform_trips_converts_total_amount_to_decimal(
 def transform_trips_trips_calculates_duration_and_flag(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
     dropoff: datetime | None,
     expected_seconds: int | None,
     expected_flag: bool | None,
@@ -138,7 +92,7 @@ def transform_trips_trips_calculates_duration_and_flag(
     raw_trip["tpep_pickup_datetime"] = datetime(2024, 1, 15, 10, 0)
     raw_trip["tpep_dropoff_datetime"] = dropoff
 
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -201,6 +155,7 @@ def transform_trips_trips_calculates_duration_and_flag(
 def test_transform_trips_flags_pickups_outside_source_month(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
     pickup: datetime | None,
     expected_date: date | None,
     expected_flag: bool | None,
@@ -208,7 +163,7 @@ def test_transform_trips_flags_pickups_outside_source_month(
     raw_trip["tpep_pickup_datetime"] = pickup
     raw_trip["tpep_dropoff_datetime"] = pickup
 
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -240,13 +195,14 @@ def test_transform_trips_flags_pickups_outside_source_month(
 def test_transform_trips_flags_passenger_count(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
     passenger_count: int | None,
     expected_missing: bool | None,
     expected_zero: bool | None,
 ) -> None:
     raw_trip["passenger_count"] = passenger_count
 
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -279,12 +235,13 @@ def test_transform_trips_flags_passenger_count(
 def test_transform_trips_flags_nonpositive_distance(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
     distance: float | None,
     expected_flag: bool | None, 
 ) -> None:
     raw_trip["trip_distance"] = distance
 
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -318,12 +275,13 @@ def test_transform_trips_flags_negative_total_amount(
     spark: SparkSession,
     raw_trip: dict[str, object],
     raw_amount: float | None,
+    raw_schema: str,
     expected_amount: Decimal | None,
     expected_flag: bool | None,
 ) -> None:
     raw_trip["total_amount"] = raw_amount
 
-    trips = spark.createDataFrame([raw_trip], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([raw_trip], schema=raw_schema)
 
     silver = transform_trips(
         trips,
@@ -345,10 +303,11 @@ def test_transform_trips_flags_negative_total_amount(
 def test_transform_trips_preserves_duplicates_and_provenance(
     spark: SparkSession,
     raw_trip: dict[str, object],
+    raw_schema: str,
 ) -> None:
     trips = spark.createDataFrame(
         [raw_trip.copy(), raw_trip.copy()],
-        schema=RAW_SCHEMA,
+        schema=raw_schema,
     )
 
     source_month = date(2024, 1, 1)
@@ -379,8 +338,9 @@ def test_transform_trips_preserves_duplicates_and_provenance(
 
 def test_validate_source_schema_rejects_missing_column(
     spark: SparkSession,
+    raw_schema: str,
 ) -> None:
-    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([], schema=raw_schema)
     trips = trips.drop("total_amount")
 
     with pytest.raises(
@@ -398,8 +358,9 @@ def test_validate_source_schema_rejects_missing_column(
 
 def test_validate_source_schema_rejects_wrong_type(
     spark: SparkSession,
+    raw_schema: str,
 ) -> None:
-    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([], schema=raw_schema)
     trips = trips.withColumn(
         "total_amount",
         F.col("total_amount").cast("string"),
@@ -423,8 +384,9 @@ def test_validate_source_schema_rejects_wrong_type(
 
 def test_validate_source_schema_rejects_unexpected_column(
     spark: SparkSession,
+    raw_schema: str,
 ) -> None:
-    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([], schema=raw_schema)
     trips = trips.withColumn(
         "extra_field",
         F.lit("unexpected"),
@@ -445,7 +407,8 @@ def test_validate_source_schema_rejects_unexpected_column(
 
 def test_validate_source_schema_accepts_expected_schema(
     spark: SparkSession,
+    raw_schema: str,
 ) -> None:
-    trips = spark.createDataFrame([], schema=RAW_SCHEMA)
+    trips = spark.createDataFrame([], schema=raw_schema)
 
     validate_source_schema(trips)
