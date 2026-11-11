@@ -355,6 +355,106 @@ def write_silver_month(
     )
 
 
+def load_silver_trips(
+    spark: SparkSession,
+    *,
+    input_path: str,
+    year: int,
+    month: int,
+    table_name: str = SILVER_TABLE,
+) -> None:
+    if not 1000 <= year <= 9999:
+        raise ValueError("year must be a four-digit year")
+
+    source_month = date(year, month, 1)
+
+    source_sha256 = validate_source_path(
+        input_path=input_path,
+        year=year,
+        month=month,
+    )
+
+    logger.info(
+        "Starting Silver load: source_month=%s, input=%s, sha256=%s",
+        source_month,
+        input_path,
+        source_sha256,
+    )
+
+    metadata = read_source_metadata(
+        spark=spark,
+        input_path=input_path,
+    )
+
+    validate_source_metadata(
+        spark=spark,
+        metadata=metadata,
+        input_path=input_path,
+        year=year,
+        month=month,
+        source_sha256=source_sha256,
+    )
+
+    logger.info(
+        "Source metadata validated: filename=%s, size_bytes=%s",
+        metadata["filename"],
+        metadata["size_bytes"],
+    )
+
+    trips = spark.read.parquet(input_path)
+    
+    validate_source_schema(trips)
+    validate_monetary_values(trips)
+
+    silver = transform_trips(
+        trips,
+        source_month=source_month,
+        source_file=input_path,
+        source_sha256=source_sha256,
+    )
+
+    quality_flags = [
+        "is_outside_source_month",
+        "has_missing_passenger_count",
+        "has_zero_passenger_count",
+        "has_nonpositive_distance",
+        "has_nonpositive_duration",
+        "has_negative_total_amount",
+    ]
+
+    quality_counts = silver.select(
+        *[
+            F.count(F.when(F.col(name), 1)).alias(name)
+            for name in quality_flags
+        ]
+    ).first()
+
+    logger.info(
+        "Silver quality checks: source_month=%s, count=%s",
+        source_month,
+        quality_counts.asDict(),
+    )
+
+    create_silver_table(
+        spark,
+        silver,
+        table_name=table_name,
+    )
+    
+    write_silver_month(
+        silver,
+        source_month=source_month,
+        table_name=table_name,
+    )
+
+    logger.info(
+        "Silver month committed: table=%s source_month=%s source_sha256=%s",
+        table_name,
+        source_month,
+        source_sha256,
+    )
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -369,11 +469,9 @@ def main() -> None:
     parser.add_argument("--month", type=int, choices=range(1, 13), required=True)
     args = parser.parse_args()
 
-    if not 1000 <= args.year <= 9999:
-        parser.error("--year must be a four-digit year")
-
+    # Reject an invalid path before starting Spark
     try:
-        source_sha256 = validate_source_path(
+        validate_source_path(
             input_path=args.input_path,
             year=args.year,
             month=args.month,
@@ -384,96 +482,11 @@ def main() -> None:
     spark = spark_session("load-silver-trips")
 
     try:
-        logger.info(
-            "Starting Silver load: source_month=%04d-%02d, input=%s, sha256=%s",
-            args.year,
-            args.month,
-            args.input_path,
-            source_sha256,
-        )
-
-        metadata = read_source_metadata(
-            spark=spark,
-            input_path=args.input_path,
-        )
-
-        logger.info(
-            "Source metadata read successfully: filename=%s",
-            metadata.get("filename"),
-        )
-
-        validate_source_metadata(
-            spark=spark,
-            metadata=metadata,
+        load_silver_trips(
+            spark,
             input_path=args.input_path,
             year=args.year,
             month=args.month,
-            source_sha256=source_sha256,
-        )
-
-        logger.info(
-            "Source metadata validated: filename=%s, size_bytes=%s",
-            metadata["filename"],
-            metadata["size_bytes"],
-        )
-
-        trips = spark.read.parquet(args.input_path)
-
-        validate_source_schema(trips)
-        validate_monetary_values(trips)
-
-        logger.info(
-            "Source schema and monetary values validated: columns=%s",
-            len(trips.columns),
-        )
-
-        source_month = date(args.year, args.month, 1)
-
-        silver = transform_trips(
-            trips,
-            source_month=source_month,
-            source_file=args.input_path,
-            source_sha256=source_sha256,
-        )
-
-        silver.filter(
-            F.col("dropoff_datetime") <= F.col("pickup_datetime")
-        ).groupBy("duration_seconds").count().orderBy("duration_seconds").show()
-
-        quality_flags = [
-            "is_outside_source_month",
-            "has_missing_passenger_count",
-            "has_zero_passenger_count",
-            "has_nonpositive_distance",
-            "has_nonpositive_duration",
-            "has_negative_total_amount",
-        ]
-
-        quality_counts = silver.select(
-            *[
-                F.count(F.when(F.col(name), 1)).alias(name)
-                for name in quality_flags
-            ]
-        ).first()
-
-        logger.info(
-            "Silver quality checks: source_month=%s, count=%s",
-            source_month,
-            quality_counts.asDict(),
-        )
-
-        create_silver_table(spark, silver)
-
-        write_silver_month(
-            silver,
-            source_month=source_month,
-        )
-
-        logger.info(
-            "Silver month committed: table=%s source_month=%s source_sha256=%s",
-            SILVER_TABLE,
-            source_month,
-            source_sha256,
         )
     finally:
         spark.stop()
