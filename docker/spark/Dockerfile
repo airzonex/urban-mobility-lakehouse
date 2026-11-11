@@ -25,6 +25,9 @@ RUN set -eux; \
 ARG PYTEST_VERSION=9.2.0
 RUN python3 -m pip install --no-cache-dir "pytest==${PYTEST_VERSION}"
 
+ARG BOTO3_VERSION=1.43.116
+RUN python3 -m pip install --no-cache-dir "boto3==${BOTO3_VERSION}"
+
 USER 185
 
 WORKDIR /opt/spark/work-dir
