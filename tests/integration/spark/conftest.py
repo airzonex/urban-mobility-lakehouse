@@ -1,8 +1,15 @@
+import hashlib
+import os
+import json
 from collections.abc import Iterator
+from contextlib import closing
 from datetime import datetime
 from uuid import uuid4
+from pathlib import Path
 
+import boto3
 import pytest
+from botocore.config import Config
 from common import spark_session
 from pyspark.sql import SparkSession
 
@@ -80,3 +87,82 @@ def raw_trip() -> dict[str, object]:
         "congestion_surcharge": 0.0,
         "Airport_fee": 0.0,
     }
+
+
+@pytest.fixture
+def raw_source_rows(
+    raw_trip: dict[str, object],
+) -> list[dict[str, object]]:
+    return [raw_trip]
+
+
+@pytest.fixture
+def raw_source(
+    spark: SparkSession,
+    raw_source_rows: list[dict[str, object]],
+    raw_schema: str,
+    tmp_path: Path,
+) -> Iterator[str]:
+    output_dir = tmp_path / "parquet"
+
+    trips = spark.createDataFrame(raw_source_rows, schema=raw_schema)
+    trips.coalesce(1).write.parquet(output_dir.as_uri())
+
+    parquet_files = list(output_dir.glob("part-*.parquet"))
+    assert len(parquet_files) == 1
+    parquet_file = parquet_files[0]
+
+    source_sha256 = hashlib.sha256(
+        parquet_file.read_bytes()
+    ).hexdigest()
+
+    filename = "yellow_tripdata_2024-01.parquet"
+    prefix = (
+        "tlc/yellow/year=2024/month=01/"
+        f"sha256={source_sha256}"
+    )
+    parquet_key = f"{prefix}/{filename}"
+    metadata_key = f"{prefix}/metadata.json"
+
+    metadata = {
+        "year": 2024,
+        "month": 1,
+        "filename": filename,
+        "sha256": source_sha256,
+        "size_bytes": parquet_file.stat().st_size,
+    }
+
+    bucket = f"test-silver-source-{uuid4().hex}"
+
+    with closing(
+        boto3.client(
+            "s3",
+            endpoint_url=os.environ["S3_ENDPOINT"],
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            region_name=os.environ["AWS_REGION"],
+            config=Config(s3={"addressing_style": "path"}),
+        )
+    ) as s3:
+        s3.create_bucket(Bucket=bucket)
+
+        try:
+            s3.upload_file(
+                Filename=str(parquet_file),
+                Bucket=bucket,
+                Key=parquet_key
+            )
+
+            s3.put_object(
+                Bucket=bucket,
+                Key=metadata_key,
+                Body=json.dumps(metadata).encode("utf-8"),
+                ContentType="application/json",
+            )
+
+            yield f"s3a://{bucket}/{parquet_key}"
+
+        finally:
+            s3.delete_object(Bucket=bucket, Key=metadata_key)
+            s3.delete_object(Bucket=bucket, Key=parquet_key)
+            s3.delete_bucket(Bucket=bucket)
