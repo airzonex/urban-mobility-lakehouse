@@ -404,6 +404,12 @@ def load_silver_trips(
     trips = spark.read.parquet(input_path)
     
     validate_source_schema(trips)
+
+    if trips.isEmpty():
+        raise ValueError(
+            f"Source Parquet contains no rows: {input_path}"
+        )
+
     validate_monetary_values(trips)
 
     silver = transform_trips(
