@@ -4,7 +4,8 @@ PYTHON := .venv/bin/python
 
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
-		sql test-unit test-ingestion test-spark
+		sql test-unit test-ingestion test-spark \
+		ingest-month load-silver load-gold-daily-pickup-zone
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -78,3 +79,27 @@ test-spark:
 				-o cache_dir=/tmp/pytest-cache \
 				-v \
 		'
+
+ingest-month:
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { echo "Usage: make ingest-month YEAR=2024 MONTH=1" >&2; exit 1; }
+	$(PYTHON) -m urban_mobility.tlc_ingestion \
+		--year "$(YEAR)" \
+		--month "$(MONTH)"
+
+load-silver:
+	@test -n "$(YEAR)" && test -n "$(MONTH)" && test -n "$(INPUT_PATH)" || { \
+		echo "Usage: make load-silver YEAR=2024 MONTH=1 INPUT_PATH='s3a://raw/tlc/yellow/year=2024/month=01/sha256=<sha256>/yellow_tripdata_2024-01.parquet'" >&2; \
+		exit 1; \
+	}
+	docker compose run --rm spark \
+		/opt/jobs/load_silver_trips.py \
+		--year "$(YEAR)" \
+		--month "$(MONTH)" \
+		--input-path "$(INPUT_PATH)"
+
+load-gold-daily-pickup-zone:
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { echo "Usage: make load-gold-daily-pickup-zone YEAR=2024 MONTH=1" >&2; exit 1; }
+	docker compose run --rm spark \
+		/opt/jobs/load_gold_daily_pickup_zone.py \
+		--year "$(YEAR)" \
+		--month "$(MONTH)"
