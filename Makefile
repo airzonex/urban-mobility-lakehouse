@@ -106,6 +106,10 @@ load-gold-daily-pickup-zone:
 		--month "$(MONTH)"
 
 inspect-gold-daily-pickup-zone:
-	docker compose exec -T trino \
-		trino --server http://localhost:8080 \
-		< sql/check_gold_daily_pickup_zone.sql
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { \
+		echo "Usage: make inspect-gold-daily-pickup-zone YEAR=2024 MONTH=1" >&2; \
+		exit 1; \
+	}
+	$(PYTHON) scripts/inspect_gold_daily_pickup_zone.py \
+		--year "$(YEAR)" \
+		--month "$(MONTH)"

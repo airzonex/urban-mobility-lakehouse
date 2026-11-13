@@ -1,4 +1,4 @@
--- january 2024: compare Gold totals with eligible Silver records
+-- compare Gold totals with eligible Silver records for the requested month
 -- expected: both *_matches columns are true
 
 WITH silver_totals AS (
@@ -6,7 +6,7 @@ WITH silver_totals AS (
         count(*) AS trip_count,
         coalesce(sum(total_amount), DECIMAL '0.00') AS total_amount
     FROM lakehouse.silver.yellow_trips
-    WHERE source_month = DATE '2024-01-01'
+    WHERE source_month = DATE '{{source_month}}'
       AND NOT is_outside_source_month
       AND NOT has_nonpositive_distance
       AND NOT has_nonpositive_duration
@@ -17,7 +17,7 @@ gold_totals AS (
         coalesce(sum(trip_count), BIGINT '0') AS trip_count,
         coalesce(sum(total_amount_sum), DECIMAL '0.00') AS total_amount
     FROM lakehouse.gold.daily_pickup_zone_stats
-    WHERE source_month = DATE '2024-01-01'
+    WHERE source_month = DATE '{{source_month}}'
 )
 SELECT
     s.trip_count AS silver_trip_count,
@@ -38,7 +38,7 @@ SELECT
     pickup_location_id,
     count(*) AS row_count
 FROM lakehouse.gold.daily_pickup_zone_stats
-WHERE source_month = DATE '2024-01-01'
+WHERE source_month = DATE '{{source_month}}'
 GROUP BY
     source_month,
     pickup_date,
