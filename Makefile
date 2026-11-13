@@ -5,7 +5,8 @@ PYTHON := .venv/bin/python
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
 		sql test-unit test-ingestion test-spark \
-		ingest-month load-silver load-gold-daily-pickup-zone
+		ingest-month load-silver load-gold-daily-pickup-zone \
+		inspect-gold-daily-pickup-zone
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -103,3 +104,8 @@ load-gold-daily-pickup-zone:
 		/opt/jobs/load_gold_daily_pickup_zone.py \
 		--year "$(YEAR)" \
 		--month "$(MONTH)"
+
+inspect-gold-daily-pickup-zone:
+	docker compose exec -T trino \
+		trino --server http://localhost:8080 \
+		< sql/check_gold_daily_pickup_zone.sql
