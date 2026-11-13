@@ -1,18 +1,17 @@
 import hashlib
-import os
 import json
+import os
 from collections.abc import Iterator
 from contextlib import closing
 from datetime import datetime
-from uuid import uuid4
 from pathlib import Path
+from uuid import uuid4
 
 import boto3
 import pytest
 from botocore.config import Config
 from common import spark_session
 from pyspark.sql import SparkSession
-
 
 RAW_SCHEMA = """
     VendorID INT,

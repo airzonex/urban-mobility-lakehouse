@@ -10,9 +10,9 @@ import pytest
 from botocore.config import Config
 from load_silver_trips import (
     create_silver_table,
-    write_silver_month,
     load_silver_trips,
     transform_trips,
+    write_silver_month,
 )
 from pyspark.sql import SparkSession
 

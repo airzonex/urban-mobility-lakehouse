@@ -2,10 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from pyspark.sql import SparkSession
-
 from load_gold_daily_pickup_zone import build_daily_pickup_zone_stats
-
+from pyspark.sql import SparkSession
 
 SILVER_SCHEMA = """
     source_month DATE,

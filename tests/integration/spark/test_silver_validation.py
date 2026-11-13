@@ -1,7 +1,6 @@
 import pytest
+from load_silver_trips import MONEY_COLUMNS, validate_monetary_values
 from pyspark.sql import SparkSession
-
-from load_silver_trips import (MONEY_COLUMNS, validate_monetary_values)
 
 
 @pytest.mark.parametrize(

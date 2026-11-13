@@ -2,14 +2,13 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F 
-from pyspark.sql.types import DecimalType
-
 from load_silver_trips import (
     transform_trips,
     validate_source_schema,
 )
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import DecimalType
 
 
 @pytest.mark.parametrize(
