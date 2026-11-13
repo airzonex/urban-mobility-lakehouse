@@ -165,3 +165,15 @@ def raw_source(
             s3.delete_object(Bucket=bucket, Key=metadata_key)
             s3.delete_object(Bucket=bucket, Key=parquet_key)
             s3.delete_bucket(Bucket=bucket)
+
+
+@pytest.fixture
+def gold_table(spark: SparkSession):
+    table_name = (
+        f"lakehouse.gold.test_daily_pickup_zone_stats_{uuid4().hex}"
+    )
+
+    try:
+        yield table_name
+    finally:
+        spark.sql(f"DROP TABLE IF EXISTS {table_name} PURGE")
