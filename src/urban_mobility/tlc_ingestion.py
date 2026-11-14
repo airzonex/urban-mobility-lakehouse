@@ -282,6 +282,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, choices=range(1, 13), required=True)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="output_json",
+        help="Write the ingestion result as JSON to stdout",
+    )
     args = parser.parse_args()
 
     if not 1000 <= args.year <= 9999:
@@ -315,6 +321,18 @@ def main() -> None:
             result.status,
             result.input_path,
         )
+
+        if args.output_json:
+            print(
+                json.dumps(
+                    {
+                        "status": result.status,
+                        "bucket": result.bucket,
+                        "object_key": result.object_key,
+                        "input_path": result.input_path,
+                    }
+                )
+            )
     finally:
         s3.close()
 
