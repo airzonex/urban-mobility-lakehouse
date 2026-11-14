@@ -9,6 +9,7 @@ import httpx
 import pytest
 from botocore.exceptions import ClientError
 
+from urban_mobility import tlc_ingestion
 from urban_mobility.tlc_ingestion import (
     IngestionResult,
     InvalidMetadataError,
@@ -992,3 +993,71 @@ def test_ingest_month_propagates_metadata_access_denied() -> None:
     s3.upload_file.assert_not_called()
     s3.put_object.assert_not_called()
     s3.delete_object.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["uploaded", "skipped"])
+def test_main_outputs_ingestion_result_as_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    object_key = (
+        f"tlc/yellow/year=2024/month=01/sha256={'a' * 64}/"
+        "yellow_tripdata_2024-01.parquet"
+    )
+
+    result = IngestionResult(
+        status=status,
+        bucket="raw",
+        object_key=object_key
+    )
+
+    monkeypatch.setenv("MINIO_API_PORT", "19000")
+    monkeypatch.setenv("MINIO_ROOT_USER", "test-user")
+    monkeypatch.setenv("MINIO_ROOT_PASSWORD", "test-password")
+    monkeypatch.setenv("MINIO_REGION", "us-east-1")
+    monkeypatch.setenv("MINIO_RAW_BUCKET", "raw")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tlc_ingestion",
+            "--year", "2024",
+            "--month", "1",
+            "--json",
+        ],
+    )
+
+    s3 = Mock()
+
+    with (
+        patch.object(tlc_ingestion, "load_dotenv"),
+        patch.object(
+            tlc_ingestion.boto3,
+            "client",
+            return_value=s3,
+        ),
+        patch.object(
+            tlc_ingestion,
+            "ingest_month",
+            return_value=result,
+        ) as ingest,
+    ):
+        tlc_ingestion.main()
+
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == {
+        "status": status,
+        "bucket": "raw",
+        "object_key": object_key,
+        "input_path": f"s3a://raw/{object_key}",
+    }
+
+    ingest.assert_called_once_with(
+        s3=s3,
+        bucket="raw",
+        year=2024,
+        month=1,
+    )
+    s3.close.assert_called_once_with()
