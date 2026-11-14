@@ -3,9 +3,11 @@ import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Literal
 
 import boto3
 import httpx
@@ -14,6 +16,17 @@ from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class IngestionResult:
+    status: Literal["uploaded", "skipped"]
+    bucket: str
+    object_key: str
+
+    @property
+    def input_path(self) -> str:
+        return f"s3a://{self.bucket}/{self.object_key}"
+
 
 class InvalidMetadataError(ValueError):
     pass
@@ -134,8 +147,8 @@ def ingest_month(
     bucket: str,
     year: int,
     month: int,
-) -> None:
-    def _upload_data() -> None:
+) -> IngestionResult:
+    def _upload_data() -> IngestionResult:
         _upload_file(
             s3=s3,
             destination=destination,
@@ -160,8 +173,14 @@ def ingest_month(
             metadata=metadata,
         )
 
+        return IngestionResult(
+            status="uploaded",
+            bucket=bucket,
+            object_key=object_key,
+        )
 
-    def _repair_data() -> None:
+
+    def _repair_data() -> IngestionResult:
         logger.info("Removing invalid metadata: s3://%s/%s", bucket, metadata_key)
 
         s3.delete_object(
@@ -169,7 +188,7 @@ def ingest_month(
             Key=metadata_key
         )
 
-        _upload_data()
+        return _upload_data()
 
 
     filename = _make_filename(year, month)
@@ -195,12 +214,10 @@ def ingest_month(
                 bucket,
                 metadata_key,
             )
-            _repair_data()
-            return
+            return _repair_data()
 
         if metadata is None:
-            _upload_data()
-            return
+            return _upload_data()
         
         expected = {
             "source_url": url,
@@ -223,8 +240,7 @@ def ingest_month(
                 bucket,
                 metadata_key,
             )
-            _repair_data()
-            return
+            return _repair_data()
         
         parquet_length = _get_parquet_length(s3, bucket, object_key)
 
@@ -234,8 +250,7 @@ def ingest_month(
                 bucket,
                 object_key,
             )
-            _repair_data()
-            return
+            return _repair_data()
         
         if parquet_length != size_bytes:
             logger.warning(
@@ -243,10 +258,15 @@ def ingest_month(
                 size_bytes,
                 parquet_length,
             )
-            _repair_data()
-            return
+            return _repair_data()
 
         logger.info("SKIPPED: s3://%s/%s", bucket, object_key)
+
+        return IngestionResult(
+            status="skipped",
+            bucket=bucket,
+            object_key=object_key,
+        )
 
 
 def main() -> None:
@@ -283,11 +303,17 @@ def main() -> None:
     )
 
     try:
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket=bucket,
             year=args.year,
             month=args.month,
+        )
+
+        logger.info(
+            "Ingestion completed: status=%s, input_path=%s",
+            result.status,
+            result.input_path,
         )
     finally:
         s3.close()

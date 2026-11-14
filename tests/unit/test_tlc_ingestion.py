@@ -10,6 +10,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from urban_mobility.tlc_ingestion import (
+    IngestionResult,
     InvalidMetadataError,
     _download_file,
     _get_parquet_length,
@@ -176,7 +177,7 @@ def test_read_metadata_raises_when_connection_interrupted() -> None:
         )
 
     assert exc_info.value is error
-    assert body.closed
+    body.close.assert_called_once_with()
 
 def test_get_parquet_length_returns_content_length() -> None:
     expected = 100
@@ -385,7 +386,7 @@ def test_ingest_month_skips_load_if_object_and_metadata_exist() -> None:
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ) as download:
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
@@ -397,6 +398,14 @@ def test_ingest_month_skips_load_if_object_and_metadata_exist() -> None:
     object_prefix = (
         f"tlc/yellow/year=2024/month=01/sha256={sha256}"
     )
+    object_key = f"{object_prefix}/yellow_tripdata_2024-01.parquet"
+
+    assert result == IngestionResult(
+        status="skipped",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     s3.get_object.assert_called_once_with(
         Bucket="raw",
@@ -431,12 +440,19 @@ def test_ingest_month_uploads_data_when_metadata_is_missing() -> None:
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     expected_metadata = {
         "source_url": (
@@ -496,12 +512,19 @@ def test_ingest_month_repairs_invalid_json_metadata() -> None:
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     assert body.closed
 
@@ -578,12 +601,19 @@ def test_ingest_month_repairs_mismatched_metadata() -> None:
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     assert body.closed
 
@@ -659,12 +689,19 @@ def test_ingest_month_repairs_invalid_downloaded_at(
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     assert body.closed
 
@@ -742,12 +779,19 @@ def test_ingest_month_repairs_missing_or_wrong_size_parquet(
         "urban_mobility.tlc_ingestion._download_file",
         return_value=(sha256, size_bytes, downloaded_at),
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3,
             bucket="raw",
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket="raw",
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://raw/{object_key}"
 
     assert body.closed
 

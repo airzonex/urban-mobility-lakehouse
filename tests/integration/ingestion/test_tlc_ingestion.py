@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from urban_mobility.tlc_ingestion import ingest_month
+from urban_mobility.tlc_ingestion import IngestionResult, ingest_month
 
 
 def test_ingest_month_uploads_file_and_metadata(
@@ -39,12 +39,19 @@ def test_ingest_month_uploads_file_and_metadata(
         "urban_mobility.tlc_ingestion._download_file",
         side_effect=fake_download,
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3_client,
             bucket=test_bucket,
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket=test_bucket,
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://{test_bucket}/{object_key}"
 
     response = s3_client.get_object(
         Bucket=test_bucket,
@@ -148,12 +155,19 @@ def test_ingest_month_skips_existing_data(
                 wraps=s3_client.delete_object,
             ) as delete_object,
         ):
-            ingest_month(
+            result = ingest_month(
                 s3=s3_client,
                 bucket=test_bucket,
                 year=2024,
                 month=1,
             )
+
+        assert result == IngestionResult(
+            status="skipped",
+            bucket=test_bucket,
+            object_key=object_key,
+        )
+        assert result.input_path == f"s3a://{test_bucket}/{object_key}"
 
         upload_file.assert_not_called()
         put_object.assert_not_called()
@@ -222,12 +236,19 @@ def test_ingest_month_completes_upload_without_metadata(
         "urban_mobility.tlc_ingestion._download_file",
         side_effect=fake_download,
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3_client,
             bucket=test_bucket,
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket=test_bucket,
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://{test_bucket}/{object_key}"
 
     response = s3_client.get_object(
         Bucket=test_bucket,
@@ -345,12 +366,19 @@ def test_ingest_month_repairs_inconsistent_storage(
         "urban_mobility.tlc_ingestion._download_file",
         side_effect=fake_download,
     ):
-        ingest_month(
+        result = ingest_month(
             s3=s3_client,
             bucket=test_bucket,
             year=2024,
             month=1,
         )
+
+    assert result == IngestionResult(
+        status="uploaded",
+        bucket=test_bucket,
+        object_key=object_key,
+    )
+    assert result.input_path == f"s3a://{test_bucket}/{object_key}"
 
     # Проверяем фактическое содержимое восстановленных объектов.
     response = s3_client.get_object(
