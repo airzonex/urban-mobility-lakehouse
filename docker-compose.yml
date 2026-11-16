@@ -1,6 +1,8 @@
 x-spark: &spark
   image: urban-mobility-spark:0.1.0
-  build: ./docker/spark
+  build:
+    context: .
+    dockerfile: docker/spark/Dockerfile
 
   environment:
     PYSPARK_PYTHON: python3
@@ -17,9 +19,6 @@ x-spark: &spark
 
     S3_ENDPOINT: http://minio:9000
     ICEBERG_WAREHOUSE: s3://${MINIO_WAREHOUSE_BUCKET:?Set MINIO_WAREHOUSE_BUCKET in .env}
-
-  volumes:
-    - ./jobs:/opt/jobs:ro
 
   mem_limit: 2g
   cpus: 2
