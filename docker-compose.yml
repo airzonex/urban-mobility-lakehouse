@@ -1,4 +1,5 @@
 x-spark: &spark
+  image: urban-mobility-spark:0.1.0
   build: ./docker/spark
 
   environment:
@@ -156,6 +157,7 @@ services:
     cpus: 2
 
   ingestion:
+    image: urban-mobility-ingestion:0.1.0
     build:
       context: .
       dockerfile: docker/ingestion/Dockerfile
@@ -173,3 +175,7 @@ services:
 volumes:
   postgres_data:
   minio_data:
+
+networks:
+  default:
+    name: urban-mobility-network
