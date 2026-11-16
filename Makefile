@@ -10,7 +10,7 @@ PYTHON := .venv/bin/python
 
 help:
 	@echo "config              Validate Compose configuration"
-	@echo "up                  Start PostgreSQL and MinIO; initialize buckets"
+	@echo "up                  Start lakehouse infrastructure and Airflow"
 	@echo "down                Stop services and preserve volumes"
 	@echo "ps                  Show all project containers"
 	@echo "logs                Show recent service logs"
@@ -28,7 +28,12 @@ config:
 	docker compose config --quiet
 
 up:
-	docker compose up -d postgres minio minio-init catalog-init trino
+	docker compose up -d postgres minio minio-init catalog-init trino airflow-postgres
+	docker compose run --rm airflow-init
+	docker compose up -d --wait \
+		airflow-api-server \
+		airflow-scheduler \
+		airflow-dag-processor
 
 down:
 	docker compose down
