@@ -1099,9 +1099,9 @@ def test_main_closes_client_and_outputs_no_json_when_ingestion_fails(
             "ingest_month",
             side_effect=error,
         ),
+        pytest.raises(RuntimeError) as exc_info,
     ):
-        with pytest.raises(RuntimeError) as exc_info:
-            tlc_ingestion.main()
+        tlc_ingestion.main()
 
     assert exc_info.value is error
     assert capsys.readouterr().out == ""
