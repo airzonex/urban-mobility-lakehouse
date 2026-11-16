@@ -200,12 +200,36 @@ These checks verify monthly totals and grain uniqueness. They do not verify ever
 
 ## Testing
 
+### Unit tests
+
+Run all unit tests:
+
+```bash
+make test-unit
+```
+
+These tests check ingestion logic, CLI behavior, and the Gold validation wrapper using mocked external dependencies. They require the project's Python environment and development dependencies, but do not require
+Docker, MinIO, or Trino.
+
+### Ingestion integration tests
+
+Run the ingestion integration tests:
+
+```bash
+make test-ingestion
+```
+
+These tests exercise the ingestion pipeline against a running MinIO instance. They use temporary buckets that the test fixtures clean up afterward.
+
+### Spark integration tests
+
 Run the Spark integration tests:
 
 ```bash
 make test-spark
 ```
 
-These tests use controlled test data and isolated Iceberg tables to check transformations, validation, and monthly replacement behavior. They require the Docker-based Spark environment and its dependencies.
+These tests use controlled test data and isolated Iceberg tables to check transformations, validation, and monthly replacement behavior.
+They require the Docker-based Spark environment and its dependencies.
 
-Tests do not verify the contents of your loaded production or demo tables. Use the layer-specific queries and reconciliation commands to inspect those datasets.
+Automated tests do not verify the contents of your loaded production or demo tables. Use the layer-specific inspection and validation commands to check those datasets.
