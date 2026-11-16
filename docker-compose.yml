@@ -23,6 +23,20 @@ x-spark: &spark
   mem_limit: 2g
   cpus: 2
 
+x-airflow: &airflow
+  image: urban-mobility-airflow:0.1.0
+  build:
+    context: ./docker/airflow
+  
+  environment:
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${AIRFLOW_DB_USER:?Set AIRFLOW_DB_USER in .env}:${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}@airflow-postgres:5432/${AIRFLOW_DB:?Set AIRFLOW_DB in .env}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:17.11-bookworm
@@ -192,6 +206,12 @@ services:
       retries: 10
 
     mem_limit: 512m
+
+  airflow-init:
+    <<: *airflow
+    profiles: ["tools"]
+    command: ["db", "migrate"]
+    restart: "no"
 
 volumes:
   postgres_data:
