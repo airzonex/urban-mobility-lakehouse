@@ -1013,7 +1013,7 @@ def test_main_outputs_ingestion_result_as_json(
         object_key=object_key
     )
 
-    monkeypatch.setenv("MINIO_API_PORT", "19000")
+    monkeypatch.setenv("S3_ENDPOINT", "http://localhost:19000")
     monkeypatch.setenv("MINIO_ROOT_USER", "test-user")
     monkeypatch.setenv("MINIO_ROOT_PASSWORD", "test-password")
     monkeypatch.setenv("MINIO_REGION", "us-east-1")
@@ -1068,7 +1068,7 @@ def test_main_closes_client_and_outputs_no_json_when_ingestion_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("MINIO_API_PORT", "19000")
+    monkeypatch.setenv("S3_ENDPOINT", "http://localhost:19000")
     monkeypatch.setenv("MINIO_ROOT_USER", "test-user")
     monkeypatch.setenv("MINIO_ROOT_PASSWORD", "test-password")
     monkeypatch.setenv("MINIO_REGION", "us-east-1")

@@ -293,7 +293,7 @@ def main() -> None:
     if not 1000 <= args.year <= 9999:
         parser.error("--year must be a four-digit year")
 
-    endpoint = f"http://localhost:{os.environ['MINIO_API_PORT']}"
+    endpoint = os.environ["S3_ENDPOINT"]
     access_key = os.environ["MINIO_ROOT_USER"]
     secret_key = os.environ["MINIO_ROOT_PASSWORD"]
     region = os.environ["MINIO_REGION"]
