@@ -256,6 +256,15 @@ services:
     command: ["scheduler"]
     restart: unless-stopped
 
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID in .env}"
+
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/config:/opt/airflow/config
+      - /var/run/docker.sock:/var/run/docker.sock
+
     healthcheck:
       test:
         - CMD-SHELL
