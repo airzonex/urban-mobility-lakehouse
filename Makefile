@@ -6,7 +6,7 @@ PYTHON := .venv/bin/python
 		check-spark check-iceberg check-iceberg-read lint format \
 		sql test-unit test-ingestion test-spark \
 		ingest-month ingest-month-local load-silver load-gold-daily-pickup-zone \
-		inspect-gold-daily-pickup-zone
+		inspect-gold-daily-pickup-zone validate-gold-daily-pickup-zone
 
 help:
 	@echo "config              Validate Compose configuration"
@@ -125,5 +125,14 @@ inspect-gold-daily-pickup-zone:
 		exit 1; \
 	}
 	$(PYTHON) scripts/inspect_gold_daily_pickup_zone.py \
+		--year "$(YEAR)" \
+		--month "$(MONTH)"
+
+validate-gold-daily-pickup-zone:
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { \
+		echo "Usage: make validate-gold-daily-pickup-zone YEAR=2024 MONTH=1" >&2; \
+		exit 1; \
+	}
+	$(PYTHON) scripts/validate_gold_daily_pickup_zone.py \
 		--year "$(YEAR)" \
 		--month "$(MONTH)"
