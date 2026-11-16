@@ -5,7 +5,7 @@ PYTHON := .venv/bin/python
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
 		sql test-unit test-ingestion test-spark \
-		ingest-month load-silver load-gold-daily-pickup-zone \
+		ingest-month ingest-month-local load-silver load-gold-daily-pickup-zone \
 		inspect-gold-daily-pickup-zone
 
 help:
@@ -82,10 +82,24 @@ test-spark:
 		'
 
 ingest-month:
-	@test -n "$(YEAR)" && test -n "$(MONTH)" || { echo "Usage: make ingest-month YEAR=2024 MONTH=1" >&2; exit 1; }
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { \
+		echo "Usage: make ingest-month YEAR=2024 MONTH=1" >&2; \
+		exit 1; \
+	}
+	docker compose run --rm ingestion \
+		--year "$(YEAR)" \
+		--month "$(MONTH)" \
+		--json
+
+ingest-month-local:
+	@test -n "$(YEAR)" && test -n "$(MONTH)" || { \
+		echo "Usage: make ingest-month-local YEAR=2024 MONTH=1" >&2; \
+		exit 1; \
+	}
 	$(PYTHON) -m urban_mobility.tlc_ingestion \
 		--year "$(YEAR)" \
-		--month "$(MONTH)"
+		--month "$(MONTH)" \
+		--json
 
 load-silver:
 	@test -n "$(YEAR)" && test -n "$(MONTH)" && test -n "$(INPUT_PATH)" || { \
