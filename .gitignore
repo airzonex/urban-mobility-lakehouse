@@ -12,3 +12,5 @@ local/
 
 airflow/logs/
 airflow/config/
+
+.venv-airflow/

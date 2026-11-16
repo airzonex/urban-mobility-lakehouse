@@ -6,3 +6,5 @@
 .ruff_cache/
 airflow/logs/
 airflow/config/
+
+.venv-airflow/
