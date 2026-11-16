@@ -1062,3 +1062,47 @@ def test_main_outputs_ingestion_result_as_json(
         month=1,
     )
     s3.close.assert_called_once_with()
+
+
+def test_main_closes_client_and_outputs_no_json_when_ingestion_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MINIO_API_PORT", "19000")
+    monkeypatch.setenv("MINIO_ROOT_USER", "test-user")
+    monkeypatch.setenv("MINIO_ROOT_PASSWORD", "test-password")
+    monkeypatch.setenv("MINIO_REGION", "us-east-1")
+    monkeypatch.setenv("MINIO_RAW_BUCKET", "raw")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tlc_ingestion",
+            "--year", "2024",
+            "--month", "1",
+            "--json",
+        ],
+    )
+
+    s3 = Mock()
+    error = RuntimeError("Ingestion failed")
+
+    with (
+        patch.object(tlc_ingestion, "load_dotenv"),
+        patch.object(
+            tlc_ingestion.boto3,
+            "client",
+            return_value=s3,
+        ),
+        patch.object(
+            tlc_ingestion,
+            "ingest_month",
+            side_effect=error,
+        ),
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            tlc_ingestion.main()
+
+    assert exc_info.value is error
+    assert capsys.readouterr().out == ""
+    s3.close.assert_called_once_with()
