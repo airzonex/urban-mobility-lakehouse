@@ -173,6 +173,31 @@ This is an inspection command: a returned `false` does not automatically cause a
 
 The requested month is substituted into the SQL template in memory. The tracked SQL file remains unchanged.
 
+### Automated validation
+
+After loading Gold, validate the requested source month:
+
+```bash
+make validate-gold-daily-pickup-zone YEAR=2024 MONTH=1
+```
+
+The command checks that:
+
+- Silver contains records for the requested source month.
+- Gold's summed trip count matches the number of eligible Silver records.
+- Gold's summed total amount matches the number of eligible Silver total amount.
+- Gold contains no duplicate combinations of source month, pickup date and pickup location.
+- Gold contains no rows when Silver exists but no records qualify.
+
+The command exits successfully only when every check passes.
+Query execution errors, invalid result output and failed checks produce a nonzero exit status.
+
+Unlike `inspect-gold-daily-pickup-zone`, this command interprets the results and can fail an automated pipeline.
+
+Validation reads existing tables without modifying them. Run it after the month's loading jobs finish, with no concurrent writes to that month.
+
+These checks verify monthly totals and grain uniqueness. They do not verify every individual pickup-date/location aggregate.
+
 ## Testing
 
 Run the Spark integration tests:
