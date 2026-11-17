@@ -1,10 +1,11 @@
 .DEFAULT_GOAL := help
 
 PYTHON := .venv/bin/python
+PYTHON_AIRFLOW := .venv-airflow/bin/python
 
 .PHONY: help config up down ps logs build-spark \
 		check-spark check-iceberg check-iceberg-read lint format \
-		sql test-unit test-ingestion test-spark \
+		sql test-unit test-ingestion test-spark test-airflow \
 		ingest-month ingest-month-local load-silver load-gold-daily-pickup-zone \
 		inspect-gold-daily-pickup-zone validate-gold-daily-pickup-zone
 
@@ -57,19 +58,19 @@ check-iceberg-read:
 	docker compose run --rm -T spark /opt/jobs/iceberg_smoke.py --read-only
 
 lint:
-	${PYTHON} -m ruff check jobs/
+	$(PYTHON) -m ruff check jobs/
 
 format:
-	${PYTHON} -m ruff format jobs/
+	$(PYTHON) -m ruff format jobs/
 
 sql:
 	docker compose exec trino trino --server http://localhost:8080 --catalog lakehouse --schema demo
 
 test-unit:
-	${PYTHON} -m pytest tests/unit -v
+	$(PYTHON) -m pytest tests/unit -v
 
 test-ingestion:
-	${PYTHON} -m pytest tests/integration/ingestion -v
+	$(PYTHON) -m pytest tests/integration/ingestion -v
 
 test-spark:
 	docker compose run --rm \
@@ -85,6 +86,10 @@ test-spark:
 				-o cache_dir=/tmp/pytest-cache \
 				-v \
 		'
+
+test-airflow:
+	$(PYTHON_AIRFLOW) -m pytest \
+		tests/airflow --import-mode=importlib -p no:anyio -v
 
 ingest-month:
 	@test -n "$(YEAR)" && test -n "$(MONTH)" || { \
