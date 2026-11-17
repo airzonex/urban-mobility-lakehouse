@@ -99,3 +99,48 @@ with DAG(
     )
 
     ingestion_result = validate_ingestion_result(ingest.output)
+
+    load_silver = DockerOperator(
+        task_id="load_silver",
+        image="urban-mobility-spark:0.1.0",
+        command=[
+            "/opt/jobs/load_silver_trips.py",
+            "--year", "{{ params.year }}",
+            "--month", "{{ params.month }}",
+            "--input-path",
+            (
+                "{{ ti.xcom_pull("
+                "task_ids='validate_ingestion_result', "
+                "key='return_value')['input_path'] }}"
+            ),
+        ],
+        docker_url="unix://var/run/docker.sock",
+        network_mode="urban-mobility-network",
+        environment={
+            "PYSPARK_PYTHON": "python3",
+            "SPARK_LOCAL_IP": "127.0.0.1",
+            "CATALOG_JDBC_URL": (
+                "jdbc:postgresql://"
+                "{{ conn.iceberg_catalog.host }}:"
+                "{{ conn.iceberg_catalog.port }}/"
+                "{{ conn.iceberg_catalog.schema }}"
+            ),
+            "CATALOG_USER": "{{ conn.iceberg_catalog.login }}",
+            "CATALOG_PASSWORD": "{{ conn.iceberg_catalog.password }}",
+            "AWS_ACCESS_KEY_ID": "{{ conn.minio_raw.login }}",
+            "AWS_SECRET_ACCESS_KEY": "{{ conn.minio_raw.password }}",
+            "AWS_REGION": "{{ conn.minio_raw.extra_dejson.region_name }}",
+            "AWS_EC2_METADATA_DISABLED": "true",
+            "S3_ENDPOINT": "{{ conn.minio_raw.host }}",
+            "ICEBERG_WAREHOUSE": "{{ conn.minio_raw.extra_dejson.warehouse }}",
+        },
+        mount_tmp_dir=False,
+        force_pull=False,
+        auto_remove="success",
+        do_xcom_push=False,
+        mem_limit="2g",
+        execution_timeout=timedelta(minutes=30),
+        retries=0,
+    )
+
+    ingestion_result >> load_silver
