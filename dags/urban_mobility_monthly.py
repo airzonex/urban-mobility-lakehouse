@@ -7,6 +7,26 @@ from airflow.sdk import DAG, Param, get_current_context, task
 from airflow.providers.docker.operators.docker import DockerOperator
 
 
+SPARK_ENVIRONMENT = {
+    "PYSPARK_PYTHON": "python3",
+    "SPARK_LOCAL_IP": "127.0.0.1",
+    "CATALOG_JDBC_URL": (
+        "jdbc:postgresql://"
+        "{{ conn.iceberg_catalog.host }}:"
+        "{{ conn.iceberg_catalog.port }}/"
+        "{{ conn.iceberg_catalog.schema }}"
+    ),
+    "CATALOG_USER": "{{ conn.iceberg_catalog.login }}",
+    "CATALOG_PASSWORD": "{{ conn.iceberg_catalog.password }}",
+    "AWS_ACCESS_KEY_ID": "{{ conn.minio_raw.login }}",
+    "AWS_SECRET_ACCESS_KEY": "{{ conn.minio_raw.password }}",
+    "AWS_REGION": "{{ conn.minio_raw.extra_dejson.region_name }}",
+    "AWS_EC2_METADATA_DISABLED": "true",
+    "S3_ENDPOINT": "{{ conn.minio_raw.host }}",
+    "ICEBERG_WAREHOUSE": "{{ conn.minio_raw.extra_dejson.warehouse }}",
+}
+
+
 @task(multiple_outputs=False)
 def validate_ingestion_result(log_lines: list[str]) -> dict[str, str]:
     required_fields = {"status", "bucket", "object_key", "input_path"}
@@ -116,24 +136,7 @@ with DAG(
         ],
         docker_url="unix://var/run/docker.sock",
         network_mode="urban-mobility-network",
-        environment={
-            "PYSPARK_PYTHON": "python3",
-            "SPARK_LOCAL_IP": "127.0.0.1",
-            "CATALOG_JDBC_URL": (
-                "jdbc:postgresql://"
-                "{{ conn.iceberg_catalog.host }}:"
-                "{{ conn.iceberg_catalog.port }}/"
-                "{{ conn.iceberg_catalog.schema }}"
-            ),
-            "CATALOG_USER": "{{ conn.iceberg_catalog.login }}",
-            "CATALOG_PASSWORD": "{{ conn.iceberg_catalog.password }}",
-            "AWS_ACCESS_KEY_ID": "{{ conn.minio_raw.login }}",
-            "AWS_SECRET_ACCESS_KEY": "{{ conn.minio_raw.password }}",
-            "AWS_REGION": "{{ conn.minio_raw.extra_dejson.region_name }}",
-            "AWS_EC2_METADATA_DISABLED": "true",
-            "S3_ENDPOINT": "{{ conn.minio_raw.host }}",
-            "ICEBERG_WAREHOUSE": "{{ conn.minio_raw.extra_dejson.warehouse }}",
-        },
+        environment=SPARK_ENVIRONMENT.copy(),
         mount_tmp_dir=False,
         force_pull=False,
         auto_remove="success",
@@ -143,4 +146,24 @@ with DAG(
         retries=0,
     )
 
-    ingestion_result >> load_silver
+    load_gold = DockerOperator(
+        task_id="load_gold",
+        image="urban-mobility-spark:0.1.0",
+        command=[
+            "/opt/jobs/load_gold_daily_pickup_zone.py",
+            "--year", "{{ params.year }}",
+            "--month", "{{ params.month }}",
+        ],
+        docker_url="unix://var/run/docker.sock",
+        network_mode="urban-mobility-network",
+        environment=SPARK_ENVIRONMENT.copy(),
+        mount_tmp_dir=False,
+        force_pull=False,
+        auto_remove="success",
+        do_xcom_push=False,
+        mem_limit="2g",
+        execution_timeout=timedelta(minutes=30),
+        retries=0,
+    )
+
+    ingestion_result >> load_silver >> load_gold
