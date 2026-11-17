@@ -31,7 +31,10 @@ SPARK_ENVIRONMENT = {
 }
 
 
-@task(multiple_outputs=False)
+@task(
+    multiple_outputs=False,
+    retries=0,
+)
 def validate_ingestion_result(log_lines: list[str]) -> dict[str, str]:
     required_fields = {"status", "bucket", "object_key", "input_path"}
     candidates = []
@@ -190,7 +193,8 @@ with DAG(
         xcom_all=True,
         mem_limit="1g",
         execution_timeout=timedelta(minutes=30),
-        retries=0,
+        retries=2,
+        retry_delay=timedelta(minutes=1),
     )
 
     ingestion_result = validate_ingestion_result(ingest.output)
@@ -218,7 +222,8 @@ with DAG(
         do_xcom_push=False,
         mem_limit="2g",
         execution_timeout=timedelta(minutes=30),
-        retries=0,
+        retries=1,
+        retry_delay=timedelta(minutes=2),
     )
 
     load_gold = DockerOperator(
@@ -238,7 +243,8 @@ with DAG(
         do_xcom_push=False,
         mem_limit="2g",
         execution_timeout=timedelta(minutes=30),
-        retries=0,
+        retries=1,
+        retry_delay=timedelta(minutes=2),
     )
 
     gold_validation = validate_gold()
