@@ -51,6 +51,7 @@ x-airflow: &airflow
     - ./dags:/opt/airflow/dags:ro
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/config:/opt/airflow/config
+    - ./sql:/opt/airflow/sql:ro
 
   depends_on:
     airflow-postgres:
@@ -263,6 +264,7 @@ services:
       - ./dags:/opt/airflow/dags:ro
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/config:/opt/airflow/config
+      - ./sql:/opt/airflow/sql:ro
       - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:

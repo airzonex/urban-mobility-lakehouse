@@ -1,10 +1,14 @@
 import json
+import logging
 import re
-from datetime import timedelta
+from contextlib import closing
+from datetime import date, timedelta
+from pathlib import Path
 
 import pendulum
 from airflow.sdk import DAG, Param, get_current_context, task
 from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.providers.trino.hooks.trino import TrinoHook
 
 
 SPARK_ENVIRONMENT = {
@@ -77,6 +81,77 @@ def validate_ingestion_result(log_lines: list[str]) -> dict[str, str]:
 
     # return only the structured result for downstream tasks
     return {field: result[field] for field in sorted(required_fields)}
+
+
+@task(
+    do_xcom_push=False,
+    retries=0,
+    execution_timeout=timedelta(minutes=10),
+)
+def validate_gold() -> None:
+    params = get_current_context()["params"]
+    source_month = date(params["year"], params["month"], 1)
+
+    sql_path = Path("/opt/airflow/sql/validate_gold_daily_pickup_zone.sql")
+    template = sql_path.read_text(encoding="utf-8")
+    placeholder = "{{source_month}}"
+
+    if placeholder not in template:
+        raise ValueError(f"Missing {placeholder} placeholder in {sql_path}")
+
+    sql = template.replace(placeholder, source_month.isoformat())
+
+    # python client expects a statement without its trailing delimiter
+    sql = sql.strip().removesuffix(";")
+
+    hook = TrinoHook(trino_conn_id="trino_lakehouse")
+
+    with (
+        closing(hook.get_conn()) as connection,
+        closing(connection.cursor()) as cursor
+    ):
+        cursor.execute(sql)
+
+        row = cursor.fetchone()
+
+        if row is None:
+            raise ValueError("Gold validation returned no rows")
+
+        if cursor.fetchone() is not None:
+            raise ValueError("Gold validation returned multiple rows")
+
+        if cursor.description is None:
+            raise ValueError("Gold validation returned no column metadata")
+
+        columns = [column[0] for column in cursor.description]
+        report = dict(zip(columns, row, strict=True))
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "Gold validation for %s: %s",
+        source_month.isoformat(),
+        report,
+    )
+
+    check_names = (
+        "silver_month_exists",
+        "trip_count_matches",
+        "total_amount_matches",
+        "grain_is_unique",
+        "empty_subset_matches",
+    )
+
+    failed_checks = [
+        name for name in check_names
+        if report.get(name) is not True
+    ]
+
+    if failed_checks:
+        raise ValueError(
+            f"Gold validation failed: {', '.join(failed_checks)}"
+        )
+
+    logger.info("GOLD_VALIDATION_PASSED")
 
 
 with DAG(
@@ -166,4 +241,6 @@ with DAG(
         retries=0,
     )
 
-    ingestion_result >> load_silver >> load_gold
+    gold_validation = validate_gold()
+
+    ingestion_result >> load_silver >> load_gold >> gold_validation
