@@ -641,3 +641,18 @@ They check DAG dependencies, concurrency configuration, ingestion-result parsing
 The AnyIO pytest plugin is disabled for this synchronous test suite.
 
 Automated tests do not verify the contents of your loaded production or demo tables. Use the layer-specific inspection and validation commands to check those datasets.
+
+## Verification
+
+The project was installed and tested on a clean Ubuntu VM using the first-time setup instructions.
+
+Verified scenarios:
+
+- Unit, ingestion integration, Spark integration, and Airflow tests pass.
+- The monthly Airflow pipeline completes successfully.
+- Reprocessing January preserves Silver row counts and Gold row counts, trip counts, and monetary totals.
+- Loading February preserves January's recorded counts and totals.
+- Gold validation passes for both months.
+- After a simulated Trino connection failure, clearing only `validate_gold` recovers the same DAG run without rerunning successful upstream tasks.
+
+The repeatability and month-isolation checks compare counts and monetary totals; they are not full row-by-row comparisons.
